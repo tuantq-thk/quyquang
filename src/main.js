@@ -42,34 +42,78 @@ const renderMessages = () => {
 };
 const remoteEnabled = Boolean(storage.jsonBinId && storage.jsonBinAccessKey);
 const localRead = () => { try { const value=JSON.parse(localStorage.getItem(storage.storageKey)||'[]'); return Array.isArray(value)?value:[]; } catch { return []; } };
+const jsonBinResponseError = async (response, action) => {
+  const body = await response.text().catch(() => '');
+  let detail = body.slice(0, 240);
+  try {
+    const payload = JSON.parse(body);
+    detail = payload.message || payload.error || detail;
+  } catch {}
+  const hints = {
+    401: 'Access Key không hợp lệ hoặc chưa được gửi.',
+    403: 'Access Key thiếu quyền đọc/cập nhật Bins.',
+    404: 'Không tìm thấy Bin ID. Kiểm tra JSONBIN_BIN_ID.',
+    429: 'JSONBin đã giới hạn số request.',
+  };
+  const hint = hints[response.status] || '';
+  return new Error(`${action} JSONBin thất bại (HTTP ${response.status})${detail ? `: ${detail}` : ''}${hint ? `. ${hint}` : ''}`);
+};
 const loadMessages = async () => {
   try {
     if(remoteEnabled) {
       const res=await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(storage.jsonBinId)}/latest`,{headers:{'X-Access-Key':storage.jsonBinAccessKey}});
-      if(!res.ok) throw new Error('Không tải được sổ lưu bút từ JSONBin.');
+      if(!res.ok) throw await jsonBinResponseError(res, 'Đọc');
       const data=await res.json(); guestMessages=[...initialMessages,...extractGuestbookMessages(data.record).filter(message=>!message.seed)];
       status.textContent='Lời nhắn đang được chia sẻ với mọi người.';
     } else {
       guestMessages=[...initialMessages,...localRead().filter(message=>!message.seed)];
       status.textContent='Đang lưu trên thiết bị này. Để chia sẻ lời nhắn, hãy cấu hình JSONBin và GitHub Actions Variables.';
     }
-  } catch(error) { guestMessages=[...initialMessages,...localRead().filter(message=>!message.seed)]; status.textContent=`Không kết nối được nơi lưu chung. Đang hiển thị lời nhắn trên thiết bị này.`; }
+  } catch(error) { guestMessages=[...initialMessages,...localRead().filter(message=>!message.seed)]; status.textContent=`Đang hiển thị lời nhắn trên thiết bị này. JSONBin: ${error.message}`; }
   renderMessages();
 };
 document.querySelector('#message-form').addEventListener('submit', async (event) => {
-  event.preventDefault(); const feedback=document.querySelector('#form-feedback'); const button=event.currentTarget.querySelector('button');
-  const form=new FormData(event.currentTarget); const entry={from:String(form.get('name')).trim(),text:String(form.get('message')).trim(),createdAt:new Date().toISOString()};
+  event.preventDefault();
+  const formElement=event.currentTarget;
+  const feedback=document.querySelector('#form-feedback');
+  const button=formElement.querySelector('button');
+  const form=new FormData(formElement);
+  const entry={from:String(form.get('name')).trim(),text:String(form.get('message')).trim(),createdAt:new Date().toISOString()};
   if(!entry.from||!entry.text) return;
   button.disabled=true; feedback.textContent='Đang lưu…';
   const updated=[entry,...guestMessages];
-  try {
-    if(remoteEnabled) {
+  let remoteError = null;
+  let localError = null;
+  if(remoteEnabled) {
+    try {
       const res=await fetch(`https://api.jsonbin.io/v3/b/${encodeURIComponent(storage.jsonBinId)}`,{method:'PUT',headers:{'Content-Type':'application/json','X-Access-Key':storage.jsonBinAccessKey},body:JSON.stringify({messages:updated.filter(message=>!message.seed)})});
-      if(!res.ok) throw new Error('Không lưu được lời nhắn lên JSONBin.');
-    }
-    localStorage.setItem(storage.storageKey,JSON.stringify(updated)); guestMessages=updated; renderMessages(); event.currentTarget.reset(); feedback.textContent='Đã lưu lời nhắn. Cảm ơn bạn! 💛';
-  } catch(error) { feedback.textContent='Chưa lưu được. Kiểm tra kết nối hoặc quyền truy cập JSONBin rồi thử lại.'; }
-  finally { button.disabled=false; }
+      if(!res.ok) throw await jsonBinResponseError(res, 'Lưu');
+    } catch(error) { remoteError=error; }
+  }
+  try {
+    localStorage.setItem(storage.storageKey,JSON.stringify(updated));
+  } catch(error) { localError=error; }
+  const remoteSaved = remoteEnabled && !remoteError;
+  const localSaved = !localError;
+  if(remoteSaved || localSaved) {
+    guestMessages=updated; renderMessages(); formElement.reset();
+  }
+  if(remoteError && !localError) {
+    guestMessages=updated; renderMessages(); formElement.reset();
+    feedback.textContent=`Đã lưu trên thiết bị này, nhưng chưa đồng bộ JSONBin. ${remoteError.message}`;
+  } else if(remoteError && localError) {
+    feedback.textContent=`Không lưu được. JSONBin: ${remoteError.message}. Bộ nhớ trình duyệt: ${localError.message}`;
+  } else if(localError && remoteEnabled) {
+    guestMessages=updated; renderMessages(); formElement.reset();
+    feedback.textContent=`Đã lưu lên JSONBin nhưng không lưu được bản cục bộ: ${localError.message}`;
+  } else if(localError) {
+    feedback.textContent=`Không lưu được trên thiết bị này: ${localError.message}`;
+  } else if(remoteEnabled) {
+    feedback.textContent='Đã lưu và đồng bộ lời nhắn với mọi người. 💛';
+  } else {
+    feedback.textContent='Đã lưu lời nhắn trên thiết bị này. 💛';
+  }
+  button.disabled=false;
 });
 loadMessages();
 const observer = new IntersectionObserver(entries => entries.forEach(e => { if(e.isIntersecting){e.target.classList.add('visible');observer.unobserve(e.target)} }), {threshold:.12});

@@ -33,6 +33,8 @@ Khi chạy local, điền hai giá trị tương ứng trong `.env.local`. Cấu
 
 Khi JSONBin đã cấu hình, mọi khách truy cập đọc và gửi lời nhắn vào cùng sổ. Bin lưu object dạng `{ "messages": [...] }`; trang cũng đọc được bin cũ có record là một mảng. Nếu chưa cấu hình hoặc dịch vụ tạm lỗi, trang đọc và lưu lời nhắn trên trình duyệt hiện tại bằng `localStorage`. Chế độ local không đồng bộ giữa các thiết bị.
 
+Nếu JSONBin từ chối cập nhật, giao diện sẽ hiển thị HTTP status và thông báo của API. `401` thường là Access Key không hợp lệ; `403` thường thiếu quyền Bins Read hoặc Update; `404` thường là Bin ID sai. Khi đồng bộ từ xa lỗi nhưng localStorage hoạt động, lời nhắn vẫn được lưu trên thiết bị và form sẽ báo rằng chưa đồng bộ lên JSONBin.
+
 ## Bộ đếm
 
 `src/config.js` đặt ngày cuối là `2026-10-15`. Bộ đếm không tính hôm nay, tính ngày cuối nếu là ngày thường và bỏ thứ Bảy, Chủ nhật. Với ngày 29/09/2026, kết quả là 12 ngày làm việc. `npm test` kiểm tra quy tắc này.
